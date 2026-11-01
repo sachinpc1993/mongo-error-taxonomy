@@ -1,0 +1,27 @@
+provider: bedrock
+
+# Evidence ablations
+include_db_schema: true
+include_gold_query: true
+
+# Input/output
+input_dir: input
+output_dir: output
+taxonomy_file: taxonomy.txt
+output_filename: annotated_output.jsonl
+
+# Runtime behaviour
+max_retries: 3
+resume: true
+
+ollama:
+  model: llama3.1:8b
+  base_url: http://localhost:11434
+  temperature: 0.0
+  timeout_seconds: 180
+
+bedrock:
+  model_id: au.anthropic.claude-sonnet-4-6
+  region_name: ap-southeast-2
+  temperature: 0.0
+  max_tokens: 10000

@@ -1,0 +1,53 @@
+EC1.1 Collection
+Definition: Selection of an incorrect, non-existent, or inappropriate collection.
+
+EC1.2 Field
+Definition: Selection or reference of an incorrect, non-existent, or inappropriate field.
+
+EC1.3 Relationship
+Definition: Incorrect identification of how collections or entities are related, including incorrect join keys or unsupported relationships.
+
+EC2.1.1 Stage Selection
+Definition: Use of an incorrect aggregation stage or omission of a required stage.
+
+EC2.1.2 Stage Placement
+Definition: Use of a valid aggregation stage at an inappropriate point in the pipeline.
+
+EC2.1.3 Stage Ordering
+Definition: Incorrect relative ordering of stages where execution order affects query semantics.
+
+EC2.2.1 Operator Selection
+Definition: Use of an operator that does not express the intended operation or condition.
+
+EC2.2.2 Operator Placement
+Definition: Use of a valid operator in an invalid or semantically inappropriate context.
+
+EC2.2.3 Operator Arguments
+Definition: Incorrect, missing, or improperly structured arguments supplied to an operator.
+
+EC2.2.4 Operator Nesting
+Definition: Incorrect hierarchical placement or composition of nested operators or expressions.
+
+EC2.3.1 Grouping
+Definition: Incorrect specification of the grouping key or grouping structure.
+
+EC2.3.2 Accumulator
+Definition: Incorrect selection or use of an aggregation accumulator such as $sum, $avg, $min, or $max.
+
+EC2.4 Projection
+Definition: Incorrect selection, exclusion, renaming, or shaping of output fields.
+
+EC2.5 Join
+Definition: Incorrect construction of cross-collection operations, including $lookup, join fields, $unwind, or handling of joined results.
+
+EC3 Output Formulation
+Definition: Errors in the final query representation, such as malformed syntax, incomplete output, invalid structure, or extraneous text.
+
+ANNOTATION RULES
+1. Compare the generated query with the natural-language intent and all evidence provided.
+2. Use the execution error as supporting evidence, but classify the underlying generation error rather than the database error message itself.
+3. Select exactly one leaf-level taxonomy code.
+4. Prefer the most specific category that directly explains the erroneous query component.
+5. If multiple errors are present, select the error most directly responsible for the query being incorrect or failing.
+6. Do not invent schema information beyond what is provided.
+7. Return only valid JSON.

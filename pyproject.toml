@@ -1,0 +1,27 @@
+[project]
+name = "text-to-nosql-taxonomy-annotator"
+version = "0.1.0"
+description = "Configurable Text-to-NoSQL error taxonomy annotation runner using Ollama or AWS Bedrock."
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.34",
+    "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "PyYAML>=6.0",
+    "python-multipart>=0.0.9",
+    "requests>=2.31",
+    "uvicorn[standard]>=0.29"
+]
+
+[project.scripts]
+taxonomy-annotator = "taxonomy_annotator.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
