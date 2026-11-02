@@ -1,191 +1,84 @@
-"""Robust parsing and validation of LLM annotation responses."""
+"""Parsing and strict validation of structured LLM annotation responses."""
 
 from __future__ import annotations
 
-import ast
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Set
 
-from .models import AnnotationResult, ErrorClassification
+from .models import AnnotationResult, ErrorAnnotation
 
 
 class AnnotationParser:
-    """
-    Parse common LLM JSON variants into a validated ``AnnotationResult``.
+    """Validate the minimal ``errors`` JSON schema and taxonomy codes."""
 
-    Supported forms include raw JSON, fenced JSON, JSON with explanatory
-    prefix/suffix text, and Python-dictionary-like single-quoted output.
-    """
-
-    REQUIRED_KEYS = {
-        "applicable_errors",
-        "primary_error",
-        "reason",
-        "code",
-        "category",
-    }
-
-    @staticmethod
-    def strip_code_fences(text: str) -> str:
-        """Remove common Markdown code-fence wrappers."""
-        cleaned = text.strip()
-        cleaned = re.sub(
-            r"^\s*```(?:json|javascript|js)?\s*",
-            "",
-            cleaned,
-            flags=re.IGNORECASE,
-        )
-        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
-        return cleaned.strip()
-
-    @staticmethod
-    def first_balanced_object(text: str) -> Optional[str]:
-        """
-        Extract the first balanced ``{...}`` object while respecting strings.
-
-        This avoids the brittle "first opening brace to last closing brace"
-        approach when the model adds extra prose.
-        """
-        start = text.find("{")
-        if start < 0:
-            return None
-
-        depth = 0
-        in_string = False
-        escaped = False
-
-        for index in range(start, len(text)):
-            char = text[index]
-
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-
-            if char == '"':
-                in_string = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start : index + 1]
-
-        return None
-
-    @staticmethod
-    def _parse_python_literal(text: str) -> Optional[Dict[str, Any]]:
-        """Safely parse Python-literal dictionaries without executing code."""
-        try:
-            value = ast.literal_eval(text)
-        except (ValueError, SyntaxError):
-            return None
-        return value if isinstance(value, dict) else None
+    def __init__(self, allowed_codes: Set[str]) -> None:
+        self.allowed_codes = allowed_codes
 
     def parse(self, raw_text: str) -> AnnotationResult:
-        """Parse and validate a raw model response."""
         if not isinstance(raw_text, str):
             raise ValueError("Model response must be a string.")
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            parsed = self._parse_fenced_json(raw_text, exc)
+        if not isinstance(parsed, dict) or set(parsed) != {"errors"}:
+            raise ValueError('Annotation must be a JSON object with only an "errors" key.')
+        if not isinstance(parsed["errors"], list):
+            raise ValueError('Annotation "errors" must be an array.')
 
-        cleaned = self.strip_code_fences(raw_text)
-        candidates = [cleaned]
-
-        balanced = self.first_balanced_object(cleaned)
-        if balanced and balanced != cleaned:
-            candidates.append(balanced)
-
-        parsed: Optional[Dict[str, Any]] = None
-
-        for candidate in candidates:
-            try:
-                value = json.loads(candidate)
-                if isinstance(value, dict):
-                    parsed = value
-                    break
-            except json.JSONDecodeError:
-                pass
-
-            parsed = self._parse_python_literal(candidate)
-            if parsed is not None:
-                break
-
-        if parsed is None:
-            raise ValueError(
-                "Could not parse a JSON object from the model response. "
-                f"Raw response: {raw_text[:1000]}"
-            )
-
-        missing = self.REQUIRED_KEYS.difference(parsed.keys())
-        if missing:
-            raise ValueError(
-                f"Annotation output missing required keys: {sorted(missing)}"
-            )
-
-        primary = parsed["primary_error"]
-        if not isinstance(primary, dict):
-            raise ValueError("Annotation output primary_error must be an object.")
-
-        primary_code = str(primary.get("code", "")).strip()
-        primary_category = str(primary.get("category", "")).strip()
-        if not all([primary_code, primary_category]):
-            raise ValueError("Annotation output primary_error is incomplete.")
-
-        applicable = parsed["applicable_errors"]
-        if not isinstance(applicable, list) or not applicable:
-            raise ValueError(
-                "Annotation output applicable_errors must be a non-empty list."
-            )
-
-        applicable_errors = []
-        for index, error in enumerate(applicable):
-            if not isinstance(error, dict):
+        errors: list[ErrorAnnotation] = []
+        seen: set[tuple[str, str]] = set()
+        for index, value in enumerate(parsed["errors"]):
+            if not isinstance(value, dict) or set(value) != {
+                "code", "location", "explanation"
+            }:
                 raise ValueError(
-                    f"Annotation output applicable_errors[{index}] must be an object."
+                    f'Annotation errors[{index}] must contain only "code", '
+                    '"location", and "explanation".'
                 )
-            error_code = str(error.get("code", "")).strip()
-            error_category = str(error.get("category", "")).strip()
-            if not all([error_code, error_category]):
-                raise ValueError(
-                    f"Annotation output applicable_errors[{index}] is incomplete."
-                )
-            applicable_errors.append(
-                ErrorClassification(code=error_code, category=error_category)
+            code, location, explanation = (
+                value["code"], value["location"], value["explanation"]
             )
+            if not all(
+                isinstance(item, str) and item.strip()
+                for item in (code, location, explanation)
+            ):
+                raise ValueError(f"Annotation errors[{index}] contains an empty value.")
+            if code not in self.allowed_codes:
+                raise ValueError(
+                    f"Unknown taxonomy code {code!r} in annotation errors[{index}]."
+                )
+            normalized = (code.strip(), location.strip())
+            if normalized in seen:
+                raise ValueError(f"Duplicate error annotation at errors[{index}].")
+            seen.add(normalized)
+            errors.append(
+                ErrorAnnotation(
+                    code=code.strip(),
+                    location=location.strip(),
+                    explanation=explanation.strip(),
+                )
+            )
+        return AnnotationResult(errors=errors)
 
-        if not any(
-            error.code == primary_code and error.category == primary_category
-            for error in applicable_errors
+    @staticmethod
+    def _parse_fenced_json(
+        raw_text: str,
+        original_error: json.JSONDecodeError,
+    ) -> Any:
+        """Parse a JSON code fence only when the complete response is not JSON."""
+        for match in re.finditer(
+            r"```(?:\s*json\b)?\s*(.*?)```",
+            raw_text,
+            flags=re.IGNORECASE | re.DOTALL,
         ):
-            raise ValueError(
-                "Annotation output primary_error must be included in "
-                "applicable_errors."
-            )
+            try:
+                return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                continue
 
-        code = str(parsed["code"]).strip()
-        category = str(parsed["category"]).strip()
-        reason = str(parsed["reason"]).strip()
-
-        if not all([code, category, reason]):
-            raise ValueError("Annotation output contains an empty required value.")
-
-        if code != primary_code or category != primary_category:
-            raise ValueError(
-                "Top-level code/category must match primary_error.code/category."
-            )
-
-        primary_error = ErrorClassification(
-            code=primary_code,
-            category=primary_category,
-        )
-        return AnnotationResult(
-            code=code,
-            category=category,
-            reason=reason,
-            applicable_errors=applicable_errors,
-            primary_error=primary_error,
-        )
+        raise ValueError(
+            f"Model response is not valid JSON and contains no valid JSON code "
+            f"fence: {original_error}"
+        ) from original_error

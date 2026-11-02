@@ -1,300 +1,162 @@
-# Text-to-NoSQL Error Taxonomy Annotator
+# Text-to-NoSQL Taxonomy Annotator
 
-A structured annotation runner for classifying Text-to-NoSQL errors using
-either local Ollama models or AWS Bedrock models.
+A JSONL runner and HTTP API for zero-shot, taxonomy-guided annotation of
+observable defects in predicted MongoDB aggregation pipelines. The runner uses
+the configured Ollama or AWS Bedrock backend and does not execute or repair
+queries.
 
-## Project structure
+## Configure and run
 
-```text
-text_to_nosql_taxonomy_annotator/
-├── config.yaml
-├── taxonomy.txt
-├── pyproject.toml
-├── README.md
-├── input/
-│   └── .gitkeep
-├── output/
-│   └── .gitkeep
-└── src/
-    └── taxonomy_annotator/
-        ├── __init__.py
-        ├── config.py
-        ├── io_utils.py
-        ├── main.py
-        ├── models.py
-        ├── parser.py
-        ├── prompt.py
-        ├── providers.py
-        └── service.py
-```
-
-## Design
-
-The implementation uses several lightweight design patterns:
-
-- **Strategy pattern**: `LLMProvider` with `OllamaProvider` and `BedrockProvider`.
-- **Factory pattern**: `LLMProviderFactory` selects the configured provider.
-- **Repository pattern**: `JsonlRepository` encapsulates JSONL file access.
-- **Builder pattern**: `PromptBuilder` dynamically constructs the system prompt.
-- **Service layer**: `AnnotationService` coordinates retries, inference, parsing,
-  resume behaviour, and output persistence.
-- **Domain models**: dataclasses represent validated annotation output and
-  runtime metadata.
-
-## Input folder
-
-Place one or more `.jsonl` files in:
-
-```text
-input/
-```
-
-The folder is intentionally empty in the distributed project.
-
-Each line must contain one JSON object.
-
-Required fields:
-
-```json
-{
-  "natural_language_query": "...",
-  "generated_nosql_query": "...",
-  "execution_error_message": "..."
-}
-```
-
-Optional evidence fields:
-
-```json
-{
-  "id": "151",
-  "task_instruction": "You are an expert annotator...",
-  "db_schema": {
-    "collections": {}
-  },
-  "gold_nosql_query": "db.collection.aggregate(...)"
-}
-```
-
-If several `.jsonl` files exist in `input/`, all are processed in lexical
-filename order.
-
-## Evidence configuration
-
-Edit `config.yaml`:
-
-```yaml
-include_db_schema: true
-include_gold_query: true
-```
-
-This supports four experiment conditions:
-
-| Schema | Gold |
-|---|---|
-| Yes | Yes |
-| Yes | No |
-| No | Yes |
-| No | No |
-
-## Ollama
-
-```yaml
-provider: ollama
-
-ollama:
-  model: llama3.1:8b
-  base_url: http://localhost:11434
-  temperature: 0.0
-```
-
-Ensure the model exists locally:
-
-```bash
-ollama pull llama3.1:8b
-```
-
-## AWS Bedrock
-
-```yaml
-provider: bedrock
-
-bedrock:
-  model_id: anthropic.claude-3-5-sonnet-20240620-v1:0
-  region_name: ap-southeast-2
-  temperature: 0.0
-  max_tokens: 1200
-```
-
-AWS credentials must already be configured.
-
-The application also loads a root-level `.env` file before creating the
-Bedrock client. Copy `.env.example` to `.env` and provide valid credentials:
-
-```bash
-cp .env.example .env
-```
-
-For production, prefer an IAM role, AWS profile, or environment variables
-managed by the deployment platform. Never commit `.env`.
-
-## Install
-
-From the project root:
+Install the project and choose a provider in `config.yaml`:
 
 ```bash
 pip install -e .
-```
-
-## Run
-
-```bash
 taxonomy-annotator
 ```
 
-or:
+The CLI reads `.jsonl` files from `input/` in lexical file order and appends
+records to `output/annotated_output.jsonl`. By default, only entries with `EX`
+equal to numeric or string zero are annotated. Records missing `EX`, and records
+with nonzero `EX`, are skipped and counted in the run log. Set
+`execution_success_only: false` to disable this filter.
 
-```bash
-python -m taxonomy_annotator.main
+Ollama and Bedrock settings, including temperature (zero by default), model
+identifier, and token limits, are configured under their respective sections
+in `config.yaml`. For Bedrock, use the standard AWS credential chain; do not
+store credentials in the configuration.
+
+## Input fields
+
+Each JSONL line is a JSON object. The runner accepts these primary fields and
+the indicated alternatives:
+
+| Information | Supported field names |
+|---|---|
+| Question | `natural_language_query`, `question`, or `query` |
+| Prediction | `generated_nosql_query`, `predicted_query`, or `prediction` |
+| Schema | `db_schema`, `schema`, or `database_schema` (optional) |
+| Reference query | `ground_truth_query`, `gold_nosql_query`, or `reference_query` (optional) |
+| Execution exception | `execution_error` or `execution_error_message` (optional; missing values are sent as `null`) |
+| Execution result | `EX` (required for the default EX=0 population filter) |
+
+Schema objects are passed through as supplied, including collection, field,
+type, and relationship metadata. The runner does not fabricate missing schema
+or execution evidence. Original input fields—including dataset, question/query
+IDs, model names, and approach identifiers—are preserved in the output.
+
+This repository currently provides a generic JSONL input path; it does not
+contain standalone DocSpider- or SM3-specific dataset adapters. Convert those
+datasets to the supported fields above while preserving their identifiers and
+benchmark outputs before running the annotator.
+
+## Taxonomy and prompts
+
+The taxonomy is loaded from `taxonomy.yaml`, separately from the system
+prompt. It contains the 15 permitted leaf codes, definitions, disambiguation
+rules, and taxonomy version. The same taxonomy and system prompt are used for
+every item; the per-item evidence appears only in the user prompt. No labelled
+examples are included.
+
+The system prompt template is:
+
+```text
+You are an expert annotator of MongoDB aggregation pipeline errors.
+
+Identify observable defects in the predicted query using the provided error taxonomy.
+
+Instructions:
+1. Assign the most specific applicable leaf-node category.
+2. Annotate all distinct errors without double-counting the same defect.
+3. Do not classify semantically equivalent query formulations as errors.
+4. Use only the provided evidence; do not infer causes or unsupported errors.
+5. Return only valid JSON.
+
+ERROR TAXONOMY:
+{taxonomy}
 ```
+
+The user prompt template is:
+
+```text
+Annotate the predicted MongoDB query.
+
+Natural-language question:
+{question}
+
+Database schema:
+{schema}
+
+Reference query:
+{ground_truth_query}
+
+Predicted query:
+{predicted_query}
+
+Execution error (if available):
+{execution_error}
+
+Return JSON with the following structure:
+{
+  "errors": [
+    {
+      "code": "EC...",
+      "location": "...",
+      "explanation": "..."
+    }
+  ]
+}
+```
+
+## Output, validation, and resume
+
+Successful output records preserve the original input and add
+`_annotation_item_id` and `taxonomy_annotation`. The annotation value contains
+`status: "success"`, an `errors` array, the raw response, provider/model,
+generation configuration, taxonomy and prompt versions, and schema/reference
+inclusion settings. An empty `errors` array is a validated finding of no
+established defect—not a missing-evidence marker or API failure.
+
+Every model attempt is also written as structured JSONL events to
+`output/llm_interactions.jsonl` by default. Request events include a UTC
+timestamp, item ID, provider/model settings, original input, and the exact
+system and user prompts. Response events include the timestamp, attempt status,
+duration, raw model response, and any provider or validation error. Configure
+`llm_log_path` in `config.yaml` to change the log path. Logs can contain
+sensitive input data and full prompts, so protect them accordingly.
+
+Every error object must contain exactly:
+
+```json
+{
+  "code": "EC2.1.2",
+  "location": "pipeline[0:2]",
+  "explanation": "The pipeline places valid stages in an order that changes the result."
+}
+```
+
+The parser first tries to parse the complete model response as JSON. If that
+fails, it tries the contents of fenced code blocks, including language-labelled
+JSON fences; it does not extract unfenced JSON from surrounding commentary.
+It rejects unknown taxonomy codes and invalid or duplicate error objects. After
+configured retries are exhausted, the output is marked
+`status: "failed"` with the error and last available raw response; this is
+never converted to an empty annotation. Failed entries can be retried on a
+subsequent run. With `resume: true`, previously successful entries—including
+validated empty annotations—are skipped when their provider/model,
+generation settings, taxonomy version, prompt version, and evidence settings
+match the current run. Legacy-format results are not treated as completed
+annotations.
 
 ## HTTP API
 
-Install the API dependencies with:
-
-```bash
-pip install -e .
-```
-
-Start the development server from the project root:
+Start the API with:
 
 ```bash
 uvicorn taxonomy_annotator.api:app --reload
 ```
 
-The API uses the same `config.yaml`, taxonomy file, and configured Ollama or
-Bedrock provider as the command-line runner. Set `TAXONOMY_CONFIG_PATH` to use
-a different configuration file.
-
-### Individual annotation
-
-`POST /v1/annotate/individual` accepts JSON containing the three required
-fields. Optional fields such as `id`, `task_instruction`, `db_schema`, and
-`gold_nosql_query` are passed through to the prompt builder.
-
-```bash
-curl -X POST http://localhost:8000/v1/annotate/individual \
-  -H "Content-Type: application/json" \
-  -d '{
-    "natural_language_query": "In which years were cars produced weighing at least 3000?",
-    "generated_nosql_query": "db.cars_data.find({\"Weight\": {\"$greaterThanOrEqual\": 3000}})",
-    "execution_error_message": "unknown operator: $greaterThanOrEqual"
-  }'
-```
-
-### Batch annotation
-
-`POST /v1/annotate/batch` accepts a multipart upload named `file`. The file can
-contain either a JSON array of objects or one JSON object per line (JSONL).
-Each object must include the same three required fields as the individual
-endpoint.
-
-```bash
-curl -X POST http://localhost:8000/v1/annotate/batch \
-  -F "file=@input/test.jsonl"
-```
-
-Both endpoints return the original input and a `taxonomy_annotation` object
-with all applicable leaf-level taxonomy errors, the primary error, its reason,
-and model metadata. The legacy top-level `code` and `category` fields mirror
-the primary error. Interactive OpenAPI documentation is available at
-`http://localhost:8000/docs`.
-
-### Python API runner
-
-Use `scripts/api_runner.py` to call either endpoint and optionally save the
-response:
-
-```bash
-python scripts/api_runner.py individual input/request.json \
-  -o output/individual.json
-
-python scripts/api_runner.py batch input/sample.jsonl \
-  -o output/annotated_output.jsonl
-```
-
-Without `-o`, the response is printed to standard output. Batch output is
-written as JSONL when the output filename ends in `.jsonl`; otherwise the full
-batch response is written as JSON.
-
-## Output
-
-The default output is:
-
-```text
-output/annotated_output.jsonl
-```
-
-For 100 input JSON entries, the output contains 100 corresponding entries
-assuming all entries are processed.
-
-Each original JSON object is preserved and augmented with:
-
-```json
-{
-  "_annotation_item_id": "151",
-  "taxonomy_annotation": {
-    "status": "success",
-    "code": "EC2.2.1",
-    "category": "Operator Selection",
-    "reason": "The generated query uses an incorrect comparison operator.",
-    "applicable_errors": [
-      {
-        "code": "EC2.2.1",
-        "category": "Operator Selection"
-      }
-    ],
-    "primary_error": {
-      "code": "EC2.2.1",
-      "category": "Operator Selection"
-    },
-    "annotator_provider": "ollama",
-    "annotator_model": "llama3.1:8b",
-    "include_db_schema": true,
-    "include_gold_query": true
-  }
-}
-```
-
-## Robust LLM-output handling
-
-`AnnotationParser` supports:
-
-- raw JSON,
-- fenced JSON such as ```` ```json ... ``` ````,
-- JSON surrounded by explanatory text,
-- extraction of the first balanced JSON object,
-- Python-dictionary-style output using single quotes.
-
-All parsed outputs are validated for:
-
-- `applicable_errors`
-- `primary_error`
-- `reason`
-
-Malformed responses are retried according to:
-
-```yaml
-max_retries: 3
-```
-
-## Resume support
-
-With:
-
-```yaml
-resume: true
-```
-
-successful entries already written to the output JSONL are skipped if the
-process is restarted after interruption.
+Set `TAXONOMY_CONFIG_PATH` to select another configuration. The API provides
+`POST /v1/annotate/individual` and `POST /v1/annotate/batch`; interactive docs
+are available at `/docs`. The HTTP API's required field names are
+`natural_language_query` and `generated_nosql_query`; schema and reference
+fields are optional, and `execution_error_message` is optional.

@@ -12,7 +12,9 @@ class AnnotationRequest(BaseModel):
 
     natural_language_query: str = Field(..., description="The user's natural-language query.")
     generated_nosql_query: str = Field(..., description="The generated NoSQL query.")
-    execution_error_message: str = Field(..., description="The database execution error.")
+    execution_error_message: str | None = Field(
+        None, description="Optional database execution exception."
+    )
 
     class Config:
         """Allow optional evidence and identifier fields used by the prompt builder."""

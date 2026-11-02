@@ -34,23 +34,28 @@ def _build_service(config_path: str) -> AnnotationService:
     config = ConfigLoader.load(config_path)
     provider_name = str(config["provider"]).strip().lower()
     provider = LLMProviderFactory.create(provider_name, config)
+    taxonomy, taxonomy_version = PromptBuilder.read_taxonomy(
+        config.get("taxonomy_file", "taxonomy.yaml")
+    )
     prompt_builder = PromptBuilder(
-        taxonomy_text=PromptBuilder.read_taxonomy(
-            config.get("taxonomy_file", "taxonomy.txt")
-        ),
+        taxonomy=taxonomy,
         include_db_schema=bool(config.get("include_db_schema", True)),
         include_gold_query=bool(config.get("include_gold_query", True)),
+        taxonomy_version=taxonomy_version,
     )
     return AnnotationService(
         provider=provider,
         prompt_builder=prompt_builder,
-        parser=AnnotationParser(),
+        parser=AnnotationParser(prompt_builder.taxonomy_codes),
         output_path=config.get("output_dir", "output")
         + "/"
         + config.get("output_filename", "annotated_output.jsonl"),
         max_retries=int(config.get("max_retries", 3)),
         resume=False,
         provider_name=provider_name,
+        llm_log_path=config.get(
+            "llm_log_path", "output/llm_interactions.jsonl"
+        ),
     )
 
 

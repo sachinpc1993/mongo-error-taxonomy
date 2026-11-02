@@ -1,0 +1,192 @@
+version: taxonomy-guided-v1
+categories:
+  - code: EC1.1
+    name: Collection
+    definition: >-
+      Selection of an incorrect, non-existent, or semantically inappropriate
+      primary collection as the source of a MongoDB aggregation query.
+    disambiguation_rule: >-
+      Assign this category when the error concerns the primary collection on
+      which the aggregation query is executed. If the primary collection is
+      appropriate but the query identifies an incorrect related collection or
+      follows an incorrect relationship path between collections or entities,
+      assign EC1.3 (Relationship Grounding) instead.
+
+  - code: EC1.2
+    name: Field
+    definition: >-
+      Selection or reference of an incorrect, non-existent, or semantically
+      inappropriate field in the database schema.
+    disambiguation_rule: >-
+      Assign this category when the query refers to a field that is absent
+      from the relevant schema or is not the appropriate schema field for the
+      intended operation. If the referenced fields are valid but the query
+      chooses an incorrect grouping key or grouping structure, assign EC2.3.1
+      (Grouping) instead.
+
+  - code: EC1.3
+    name: Relationship Grounding
+    definition: >-
+      Incorrect identification of the intended semantic relationship between
+      collections or entities, including selection of an unrelated collection
+      or an incorrect relationship path.
+    disambiguation_rule: >-
+      Assign this category when the query identifies the wrong relationship,
+      related collection, or relationship path. If the intended relationship
+      and participating collections are correctly identified but the query
+      implements the join incorrectly, assign EC2.5 (Join Construction)
+      instead.
+
+  - code: EC2.1.1
+    name: Stage Selection
+    definition: >-
+      Use of an incorrect MongoDB aggregation stage, or omission of an
+      aggregation stage required to express the operation requested in the
+      natural-language question.
+    disambiguation_rule: >-
+      Assign this category when a required aggregation stage is missing or
+      when an inappropriate stage has been selected for the intended operation.
+      If the necessary stages are present and appropriate but appear in an
+      incorrect relative order, assign EC2.1.2 (Stage Ordering) instead.
+
+  - code: EC2.1.2
+    name: Stage Ordering
+    definition: >-
+      Incorrect relative ordering of otherwise valid aggregation stages,
+      causing operations to act on unintended intermediate results or
+      changing the intended query semantics.
+    disambiguation_rule: >-
+      Assign this category when the relevant aggregation stages are valid and
+      present but their order produces incorrect results or semantics. If the
+      error arises because a necessary stage was omitted or an inappropriate
+      stage was selected, assign EC2.1.1 (Stage Selection) instead.
+
+  - code: EC2.2.1
+    name: Operator Selection
+    definition: >-
+      Selection of an operator that does not express the comparison,
+      transformation, or condition required by the natural-language question.
+    disambiguation_rule: >-
+      Assign this category when the query selects an operator with the wrong
+      comparison, transformation, or conditional meaning. If the incorrectly
+      selected operator is specifically an aggregation accumulator, assign
+      EC2.3.2 (Accumulator) instead. If the operator is appropriate but a
+      syntactically valid literal or parameter value is semantically incorrect,
+      assign EC2.6 (Literal and Parameter Values) instead.
+
+  - code: EC2.2.2
+    name: Operator Context Misuse
+    definition: >-
+      Use of an otherwise valid MongoDB operator in a syntactic context where
+      that operator's role is not permitted.
+    disambiguation_rule: >-
+      Assign this category when the operator itself is valid but MongoDB does
+      not permit its use in the position or syntactic context in which it
+      appears. If the operators are valid in their respective contexts but
+      their nesting or logical or computational composition is incorrect,
+      assign EC2.2.4 (Expression Nesting and Composition) instead.
+
+  - code: EC2.2.3
+    name: Operator Arguments
+    definition: >-
+      Provision of incorrect, missing, or improperly structured arguments that
+      violate the required type, number, or structural constraints of an
+      otherwise appropriate MongoDB operator.
+    disambiguation_rule: >-
+      Assign this category when an operator has an invalid argument type,
+      number of arguments, or argument structure. If the operator's argument
+      is syntactically and structurally valid but contains an incorrect
+      literal or parameter value, assign EC2.6 (Literal and Parameter Values)
+      instead.
+
+  - code: EC2.2.4
+    name: Expression Nesting and Composition
+    definition: >-
+      Incorrect hierarchical nesting, grouping, or composition of otherwise
+      valid operators and expressions within a permitted query context,
+      resulting in unintended logical or computational semantics.
+    disambiguation_rule: >-
+      Assign this category when operators and expressions are individually
+      valid in their contexts but their hierarchical arrangement or
+      combination changes the intended logic or computation. If an operator
+      is used in a syntactic context where MongoDB does not permit it,
+      assign EC2.2.2 (Operator Context Misuse) instead.
+
+  - code: EC2.3.1
+    name: Grouping
+    definition: >-
+      Incorrect specification of the grouping key or grouping structure
+      within a MongoDB $group aggregation stage.
+    disambiguation_rule: >-
+      Assign this category when the fields referenced for grouping are valid
+      schema fields but the chosen grouping key or structure does not express
+      the requested grouping semantics. If the grouping expression refers to
+      an incorrect or non-existent schema field, assign EC1.2 (Field) instead.
+
+  - code: EC2.3.2
+    name: Accumulator
+    definition: >-
+      Incorrect selection or semantic use of a MongoDB aggregation
+      accumulator within an otherwise valid aggregation context.
+    disambiguation_rule: >-
+      Assign this category in preference to EC2.2.1 (Operator Selection) when
+      the operator-selection error specifically concerns an aggregation
+      accumulator and the statistical or aggregation operation it represents.
+      If the accumulator is appropriate but its arguments violate required
+      type, number, or structural constraints, assign EC2.2.3 (Operator
+      Arguments) instead.
+
+  - code: EC2.4
+    name: Projection
+    definition: >-
+      Incorrect selection, exclusion, renaming, computation, or shaping of
+      fields in the query output.
+    disambiguation_rule: >-
+      Assign this category when the error concerns which valid output fields
+      are included or excluded, or how those fields are renamed, computed,
+      or shaped. If the error arises from referencing an incorrect or
+      non-existent field in the database schema, assign EC1.2 (Field) instead.
+
+  - code: EC2.5
+    name: Join Construction
+    definition: >-
+      Incorrect implementation of a correctly identified relationship between
+      collections, including join-field mapping, $lookup configuration,
+      handling of the joined output field, $unwind, or subsequent processing
+      of joined results.
+    disambiguation_rule: >-
+      Assign this category when the intended cross-collection relationship is
+      correctly grounded but the operations used to implement that
+      relationship are faulty. If the error instead concerns identifying the
+      wrong related collection, semantic relationship, or relationship path,
+      assign EC1.3 (Relationship Grounding) instead.
+
+  - code: EC2.6
+    name: Literal and Parameter Values
+    definition: >-
+      Specification of syntactically valid but semantically incorrect literal
+      values or operation parameters, including numeric constants, strings,
+      thresholds, offsets, limits, sorting directions, and temporal units.
+    disambiguation_rule: >-
+      Assign this category only when the literal or parameter is structurally
+      valid for the relevant operation but its value does not match the
+      request. If an argument violates an operator's type, number, or
+      structural constraints, assign EC2.2.3 (Operator Arguments) instead.
+      If the error involves selecting or referencing an incorrect collection,
+      field, or relationship from the schema, assign the applicable EC1
+      category instead.
+
+  - code: EC3
+    name: Output Formulation
+    definition: >-
+      Errors in the final query representation, including malformed syntax,
+      incomplete output, invalid overall query structure, or extraneous
+      non-query text that violates the expected output format.
+    disambiguation_rule: >-
+      Assign this category when the defect concerns the syntax, completeness,
+      overall structure, or required formatting of the generated query output.
+      If the query's invalidity is specifically caused by an operator being
+      used in a prohibited syntactic context, assign EC2.2.2 (Operator Context
+      Misuse) instead. If it is caused by arguments that violate an operator's
+      type, number, or structural constraints, assign EC2.2.3 (Operator
+      Arguments) instead.

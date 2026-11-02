@@ -13,13 +13,18 @@ class LLMProvider(ABC):
     """Strategy interface for invoking an annotation LLM."""
 
     @abstractmethod
-    def generate(self, system_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
         """Return the model's raw textual response."""
         raise NotImplementedError
 
     @abstractmethod
     def model_name(self) -> str:
         """Return the configured model identifier."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def generation_configuration(self) -> Dict[str, Any]:
+        """Return non-secret generation settings for reproducibility."""
         raise NotImplementedError
 
 
@@ -30,7 +35,7 @@ class OllamaProvider(LLMProvider):
         """Initialize the provider from the ``ollama`` configuration block."""
         self.config = config
 
-    def generate(self, system_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
         """Invoke Ollama's chat endpoint and return its response content."""
         base_url = str(
             self.config.get("base_url", "http://localhost:11434")
@@ -45,13 +50,7 @@ class OllamaProvider(LLMProvider):
             },
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        "Perform the annotation now. "
-                        "Return only the requested JSON object."
-                    ),
-                },
+                {"role": "user", "content": user_prompt},
             ],
         }
 
@@ -69,6 +68,13 @@ class OllamaProvider(LLMProvider):
         """Return the configured Ollama model name."""
         return str(self.config["model"])
 
+    def generation_configuration(self) -> Dict[str, Any]:
+        return {
+            "temperature": float(self.config.get("temperature", 0.0)),
+            "timeout_seconds": int(self.config.get("timeout_seconds", 180)),
+            "response_format": "json",
+        }
+
 
 class BedrockProvider(LLMProvider):
     """AWS Bedrock Converse API provider."""
@@ -81,7 +87,7 @@ class BedrockProvider(LLMProvider):
             region_name=self.config.get("region_name", "ap-southeast-2"),
         )
 
-    def generate(self, system_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
         """Invoke the Bedrock Converse API and combine text content blocks."""
         response = self.client.converse(
             modelId=self.config["model_id"],
@@ -91,10 +97,7 @@ class BedrockProvider(LLMProvider):
                     "role": "user",
                     "content": [
                         {
-                            "text": (
-                                "Perform the annotation now. "
-                                "Return only the requested JSON object."
-                            )
+                            "text": user_prompt
                         }
                     ],
                 }
@@ -114,6 +117,13 @@ class BedrockProvider(LLMProvider):
     def model_name(self) -> str:
         """Return the configured Bedrock model identifier."""
         return str(self.config["model_id"])
+
+    def generation_configuration(self) -> Dict[str, Any]:
+        return {
+            "temperature": float(self.config.get("temperature", 0.0)),
+            "max_tokens": int(self.config.get("max_tokens", 1200)),
+            "region_name": self.config.get("region_name", "ap-southeast-2"),
+        }
 
 
 class LLMProviderFactory:

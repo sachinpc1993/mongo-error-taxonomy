@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set
+from typing import Any, Dict, List, Set
 
 
 class JsonlRepository:
@@ -13,8 +14,33 @@ class JsonlRepository:
     REQUIRED_FIELDS = {
         "natural_language_query",
         "generated_nosql_query",
-        "execution_error_message",
     }
+
+    @staticmethod
+    def execution_success_population(
+        entries: List[Dict[str, Any]],
+    ) -> tuple[List[Dict[str, Any]], int, int]:
+        """Return EX=0 records plus counts of records excluded for EX or missing EX."""
+        eligible: List[Dict[str, Any]] = []
+        skipped_nonzero = 0
+        skipped_missing = 0
+        for entry in entries:
+            if "EX" not in entry or entry["EX"] is None or isinstance(entry["EX"], bool):
+                skipped_missing += 1
+                continue
+            try:
+                execution_result = Decimal(str(entry["EX"]).strip())
+            except (InvalidOperation, ValueError):
+                skipped_missing += 1
+                continue
+            if not execution_result.is_finite():
+                skipped_missing += 1
+                continue
+            if execution_result == 0:
+                eligible.append(entry)
+            else:
+                skipped_nonzero += 1
+        return eligible, skipped_nonzero, skipped_missing
 
     @classmethod
     def read_directory(cls, directory: str | Path) -> List[Dict[str, Any]]:
@@ -64,6 +90,14 @@ class JsonlRepository:
                     )
 
                 missing = cls.REQUIRED_FIELDS.difference(record.keys())
+                if "natural_language_query" not in record and any(
+                    key in record for key in ("question", "query")
+                ):
+                    missing.discard("natural_language_query")
+                if "generated_nosql_query" not in record and any(
+                    key in record for key in ("predicted_query", "prediction")
+                ):
+                    missing.discard("generated_nosql_query")
                 if missing:
                     raise ValueError(
                         f"{source} line {line_number} is missing fields: "
@@ -85,9 +119,12 @@ class JsonlRepository:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     @staticmethod
-    def completed_ids(path: str | Path) -> Set[str]:
+    def completed_ids(
+        path: str | Path,
+        expected_metadata: Dict[str, Any] | None = None,
+    ) -> Set[str]:
         """
-        Return IDs for successfully annotated records already present in output.
+        Return IDs with successful results matching the current run configuration.
 
         Invalid/truncated output lines are ignored so interrupted runs can resume.
         """
@@ -111,7 +148,12 @@ class JsonlRepository:
                 if (
                     isinstance(annotation, dict)
                     and annotation.get("status") == "success"
+                    and isinstance(annotation.get("errors"), list)
                     and record.get("_annotation_item_id") is not None
+                    and all(
+                        annotation.get(key) == value
+                        for key, value in (expected_metadata or {}).items()
+                    )
                 ):
                     completed.add(str(record["_annotation_item_id"]))
 

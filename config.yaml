@@ -7,8 +7,10 @@ include_gold_query: true
 # Input/output
 input_dir: input
 output_dir: output
-taxonomy_file: taxonomy.txt
+taxonomy_file: taxonomy.yaml
 output_filename: annotated_output.jsonl
+llm_log_path: output/llm_interactions.jsonl
+execution_success_only: true
 
 # Runtime behaviour
 max_retries: 3
@@ -24,4 +26,4 @@ bedrock:
   model_id: au.anthropic.claude-sonnet-4-6
   region_name: ap-southeast-2
   temperature: 0.0
-  max_tokens: 10000
+  max_tokens: 100000

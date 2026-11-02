@@ -19,14 +19,15 @@ def main() -> None:
     provider_name = str(config["provider"]).strip().lower()
     provider = LLMProviderFactory.create(provider_name, config)
 
-    taxonomy_text = PromptBuilder.read_taxonomy(
-        config.get("taxonomy_file", "taxonomy.txt")
+    taxonomy, taxonomy_version = PromptBuilder.read_taxonomy(
+        config.get("taxonomy_file", "taxonomy.yaml")
     )
 
     prompt_builder = PromptBuilder(
-        taxonomy_text=taxonomy_text,
+        taxonomy=taxonomy,
         include_db_schema=bool(config.get("include_db_schema", True)),
         include_gold_query=bool(config.get("include_gold_query", True)),
+        taxonomy_version=taxonomy_version,
     )
 
     input_dir = Path(config.get("input_dir", "input"))
@@ -38,6 +39,15 @@ def main() -> None:
     )
 
     entries = JsonlRepository.read_directory(input_dir)
+    if bool(config.get("execution_success_only", True)):
+        entries, skipped_nonzero, skipped_missing = (
+            JsonlRepository.execution_success_population(entries)
+        )
+        print(
+            "EX=0 population filter enabled: "
+            f"{len(entries)} eligible, {skipped_nonzero} nonzero, "
+            f"{skipped_missing} missing EX (skipped)."
+        )
 
     print(
         f"Loaded {len(entries)} input entries.\n"
@@ -51,11 +61,14 @@ def main() -> None:
     service = AnnotationService(
         provider=provider,
         prompt_builder=prompt_builder,
-        parser=AnnotationParser(),
+        parser=AnnotationParser(prompt_builder.taxonomy_codes),
         output_path=output_path,
         max_retries=int(config.get("max_retries", 3)),
         resume=bool(config.get("resume", True)),
         provider_name=provider_name,
+        llm_log_path=config.get(
+            "llm_log_path", "output/llm_interactions.jsonl"
+        ),
     )
 
     service.run(entries)
